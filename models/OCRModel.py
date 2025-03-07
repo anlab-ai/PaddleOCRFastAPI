@@ -164,6 +164,7 @@ class ImageReader():
         total_digit = int(infos.get("total_digit", 0))
         digit_before_dot = int(infos.get("digit_before_dot", 0))
         use_rotate_on_every_image = True
+        use_extend_on_every_image = True
             
         print(infos)
         
@@ -290,6 +291,15 @@ class ImageReader():
                 textImg = img[int(y):int(y_m), int(x):int(x_m)]
                 images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
                 list_box.append((x, y, x_m, y_m))
+                
+            if (use_extend_on_every_image):
+                x1, y1 = int(max(0, x-text_width*0.5)), int(max(0, y-text_height*0.5))
+                x2, y2 = int(x_m + text_width*0.5), int(y_m + text_height*0.3)
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(x1, img_W), min(y2, img_H)
+                textImg = img[y1:y2, x1:x2]
+                images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
+                list_box.append((x, y, x_m, y_m))
 
         if len(images) > 0:
             images = torch.stack(images).to(self.args.device)
@@ -299,22 +309,40 @@ class ImageReader():
                 p[:, :, 11:74] = 0
                 p[:, :, 75:76] = 0
                 p[:, :, 77:] = 0
-                pred, p = self.model.tokenizer.decode(p)
+                pred, p = self.model.tokenizer.decode(p, text_threshold=0.5)
             scores = ([s.cpu().mean().item() for s in p])
             texts = pred
+            # std_probs = []
+            # for img_id in range(len(scores)):
+            #     text = texts[img_id]
+            #     prob = p[img_id]
+            #     valid_token_ids = [token_id for token_id in range(len(text))
+            #                        if prob[token_id] > 0.5]
+            #     prob = [prob[token_id] for token_id in valid_token_ids]
+            #     std_prob = np.array(prob).std()
+            #     std_probs.append(std_prob)
+            #     text = [text[token_id] for token_id in valid_token_ids]
+            #     text = "".join(text)
+            # std_probs = [np.array(s).std() for s in p]
             print(scores)
         print("output texts: ", texts)
 
         tensor_boxes = torch.Tensor(list_box)
         scores = torch.Tensor(scores)
-        roi_indices = nms(tensor_boxes, scores, 0.1).numpy()
+        roi_indices = nms(tensor_boxes, scores, 0.3).numpy()
+        # print(tensor_boxes.shape, scores.shape)
+        # roi_indices = list(range(len(scores)))
 
         full_screen = [[x * img_W, y * img_H] for (x, y) in full_screen]
         screen_polygon = Polygon(full_screen)
         for idx in roi_indices:
             text = texts[idx]
             x_min, y_min, x_max, y_max = list_box[idx]
-
+            
+            # if scores[idx] < 0.7:
+            #     continue
+            # if std_probs[idx] > 0.1:
+            #     continue
             if scores[idx] < 0.9:
                 continue
             if len(text) > self.max_length_text:
@@ -322,11 +350,11 @@ class ImageReader():
             is_contain_number = any([c for c in text if c.isdigit()])
             if not is_contain_number:
                 continue
-            if x_max - x_min > img_W * 0.2 or y_max - y_min > img_H * 0.3:
+            if x_max - x_min > img_W * 0.3 or y_max - y_min > img_H * 0.3:
                 continue
 
-            point = Point((x_min+x_max)/2, (y_min+y_max)/2)
-            if not screen_polygon.contains(point):
+            point = Point((x_min+x_max)/2 - (x_max-x_min)*0.1, (y_min+y_max)/2 - (y_max-y_min)*0.1)
+            if not screen_polygon.contains(point) and scores[idx] < 0.95:
                 continue
             
             if digit_before_dot > 0:
@@ -336,7 +364,7 @@ class ImageReader():
                         output_text = output_text[:digit_before_dot] + "." + output_text[digit_before_dot:]
                         text = output_text
             cv2.rectangle(drawImg, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (0, 255, 0), 10)
-            cv2.putText(drawImg, text, (int(x_max),int(y_max)), cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 0, 255), 20,
+            cv2.putText(drawImg, text, (int(x_min),int(y_min)), cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 0, 255), img_H//160,
                         bottomLeftOrigin=False)
         
         drawImg = cv2.resize(drawImg, (0,0), fx=0.5, fy=0.5)
