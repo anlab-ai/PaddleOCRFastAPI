@@ -76,7 +76,7 @@ class BaseTokenizer(ABC):
         """Internal method which performs the necessary filtering prior to decoding."""
         raise NotImplementedError
 
-    def decode(self, token_dists: Tensor, raw: bool = False) -> tuple[list[str], list[Tensor]]:
+    def decode(self, token_dists: Tensor, raw: bool = False, text_threshold=0) -> tuple[list[str], list[Tensor]]:
         """Decode a batch of token distributions.
 
         Args:
@@ -126,6 +126,8 @@ class Tokenizer(BaseTokenizer):
         # Truncate after EOS
         ids = ids[:eos_idx]
         probs = probs[: eos_idx + 1]  # but include prob. for EOS (if it exists)
+        # print(probs)
+        # probs = probs[:eos_idx]
         return probs, ids
 
 
