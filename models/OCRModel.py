@@ -13,7 +13,7 @@ from paddleocr import PaddleOCR, draw_ocr
 from utils.ImageHelper import *
 from strhub.data.module import SceneTextDataModule
 from strhub.models.utils import load_from_checkpoint, parse_model_args
-from models.TextDetection import detect_chalk_text
+from models.TextDetection import detect_chalk_text, remove_box_by_intersect_ratio
 from torchvision.ops import nms
 from PIL import Image
 import io
@@ -42,7 +42,9 @@ class ImageReader():
         self.ocr = PaddleOCR(use_angle_cls=False, lang='japan', 
                              rec_model_dir="./chalk_font_hwjp_number_PP-OCRv3_inference", 
                              rec_char_dict_path="./chalk_font_hwjp_number_PP-OCRv3_inference/dict.txt",
-                             det_model_dir="./paddle_models/det/red_chalk_PP-OCR_v3_det_inference/Student")
+                             det_model_dir="./paddle_models/det/red_chalk_PP-OCR_v3_det_inference/Student",
+                             det_db_thresh=0.3,
+                             det_db_box_thresh=0.5)
         parser = argparse.ArgumentParser()
         
         # parser.add_argument('--images', nargs='+', help='Images to read')
@@ -136,15 +138,15 @@ class ImageReader():
             full_screen = [[0.3575, 0.05], [1-0.3575, 0.05], [1-0.025, 1-0.05], [0.025, 1-0.05]]
             # 9 box
             screen_boxes = [
-                [[0.26, 0.3], [0.32, 0.35], [0.26, 0.52], [0.20, 0.46]],
-                [[0.135, 0.68], [0.168, 0.72], [0.09, 0.936], [0.061, 0.8769]],
-                [[0.398, 0.41], [0.588, 0.41], [0.588, 0.53], [0.398, 0.53]],
-                [[0.398, 0.58], [0.588, 0.58], [0.588, 0.70], [0.398, 0.70]],
-                [[0.14, 0.84], [0.36, 0.84], [0.36, 0.937], [0.14, 0.937]],
-                [[0.66, 0.84], [0.86, 0.84], [0.86, 0.937], [0.66, 0.937]],
-                [[0.68, 0.34], [0.735, 0.29], [0.795, 0.4499], [0.74, 0.5019]],
-                [[0.76, 0.57], [0.82, 0.52], [0.88, 0.68], [0.819, 0.73]],
-                [[0.83, 0.746], [0.888, 0.70], [0.96, 0.8969], [0.903, 0.932]]
+                [[0.375000, 0.358185], [0.602700, 0.358185], [0.602700, 0.529947], [0.375000, 0.529947]],
+                [[0.375000, 0.543416], [0.611600, 0.543416], [0.611600, 0.738968], [0.375000, 0.738968]],
+                [[0.141850, 0.701957], [0.399400, 0.701957], [0.399400, 0.980605], [0.141850, 0.980605]],
+                [[0.613500, 0.712989], [0.858330, 0.712989], [0.858330, 0.996441], [0.613500, 0.996441]],
+                [[0.386906, 0.290877], [0.280316, 0.588586], [0.150004, 0.440866], [0.256594, 0.143158]],
+                [[0.248342, 0.615558], [0.109714, 0.985423], [-0.012192, 0.840758], [0.126436, 0.470894]],
+                [[0.693036, 0.572700], [0.588607, 0.286567], [0.732104, 0.120752], [0.836533, 0.406885]],
+                [[0.772091, 0.788536], [0.684189, 0.546764], [0.836429, 0.371518], [0.924331, 0.613289]],
+                [[0.895896, 1.047910], [0.770612, 0.703322], [0.896194, 0.558763], [1.021478, 0.903350]]
             ]
             left_idx = 0
             right_idx = 6
@@ -152,11 +154,11 @@ class ImageReader():
             full_screen = [[0.25, 0], [1-0.25, 0], [1-0.025, 1-0.05], [0.025, 1-0.05]]
             # 5 box
             screen_boxes = [
-                [[0.3, 0.1], [0.1, 0.936], [0.042, 0.8769], [0.2361, 0.068]],
-                [[0.39, 0.1], [0.62, 0.1], [0.62, 0.74], [0.39, 0.74]],
-                [[0.135, 0.8], [0.36, 0.8], [0.36, 0.95], [0.135, 0.95]],
-                [[0.63, 0.8], [0.86, 0.8], [0.86, 0.95], [0.63, 0.95]],
-                [[0.893, 0.932], [0.701, 0.1], [0.765, 0.068], [0.96, 0.8969]]
+                [[0.451769, 0.048466], [0.235031, 0.993690], [0.007846, 0.901081], [0.224584, -0.044144]],
+                [[0.364600, 0.011600], [0.642000, 0.011600], [0.642000, 0.868067], [0.364600, 0.868067]],
+                [[0.073650, 0.787067], [0.383800, 0.787067], [0.383800, 0.998600], [0.073650, 0.998600]],
+                [[0.600350, 0.782607], [0.946200, 0.782607], [0.946200, 0.998600], [0.600350, 0.998600]],
+                [[0.808787, 0.972856], [0.589139, 0.049634], [0.815283, -0.046016], [1.034931, 0.877206]]
             ]
             left_idx = 0
             right_idx = 4
@@ -168,8 +170,6 @@ class ImageReader():
             
         print(infos)
         
-        # with open(position_path, "r") as f:
-        #     positions = json.load(f)["data"]
         img = bytes_to_ndarray(imageFileBytes)
         drawImg = img.copy()
         img_H, img_W = img.shape[:2]
@@ -190,10 +190,6 @@ class ImageReader():
         images = []
         txts = []
         for i in range(len(positions)):
-            # p1 = [positions[i][0]["x"],positions[i][0]["y"]]
-            # p2 = [positions[i][1]["x"],positions[i][1]["y"]]
-            # p3 = [positions[i][2]["x"],positions[i][2]["y"]]
-            # p4 = [positions[i][3]["x"],positions[i][3]["y"]]
             p1 = positions[i][0]
             p2 = positions[i][1]
             p3 = positions[i][2]
@@ -216,45 +212,31 @@ class ImageReader():
                     new_points = [[0, line1], [0, 0], [line2, 0], [line2, line1]]
                 old_pts = np.array([p1, p2, p3, p4], dtype=np.float32).reshape((-1, 1, 2))
                 new_pts = np.array(new_points, dtype=np.float32).reshape((-1, 1, 2))
-                # M = cv2.getPerspectiveTransform(old_pts, new_pts)
                 M, _ = cv2.findHomography(old_pts, new_pts)
                 cropImg = cv2.warpPerspective(img, M, (int(max(line1, line2)), int(min(line1, line2))))
             else:
                 cropImg = img[y:y+height, x:x+width]
 
-            # cv2.imwrite(f"./crop/crop/{i}.jpg", cropImg)
-            result = detect_chalk_text(cropImg, self.ocr)
+            cv2.imwrite(f"./crop/crop/{i}.png", cropImg)
+            result = detect_chalk_text(cropImg, self.ocr, threshold=100)
 
             if len(result[0]) == 0:
                 images.append(self.img_transform(Image.fromarray(cropImg, 'RGB')))
-                # import time
-                # cv2.imwrite(f"./crop/{time.time()}.jpg", cropImg)
-                # images.append(cropImg)
                 list_box.append((x_min,y_min,x_max,y_max))
             else:
                 for box in result[0]:
                     x,y,x_m,y_m = quad_coords_to_xyxy(box)
-                    # x = int(x/scale)
-                    # y = int(y/scale)
-                    # x_m = int(x_m/scale)
-                    # y_m = int(y_m/scale)
+                    y = int(y - (y_m - y) * 0.1)
+                    y_m = int(y_m + (y_m - y) * 0.1)
+                    x = int(x - (x_m - x) * 0.1)
+                    x_m = int(x_m + (x_m - x) * 0.1)
+                    
                     textImg = cropImg[int(y):int(y_m), int(x):int(x_m)]
-                    text_width, text_height = x_m - x, y_m - y
-                    # textImg = cropImg[int(y-text_height*0.1):int(y_m+text_height*0.1), int(x-text_width*0.1):int(x_m+text_width*0.1)]
-                    # if min(textImg.shape) == 0:
-                    #     continue
                     images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
-                    # cv2.imwrite(f"./crop/text/{time.time()}.jpg", textImg)
-                    # cv2.imwrite(f"./crop/{time.time()}.jpg", textImg)
-                    # images.append(textImg)
                     if is_rotated:
-                        # cv2.imwrite("cropImg.jpg", cropImg)
-                        # print(box)
                         inv_box = [[x, y], [x_m, y], [x_m, y_m], [x, y_m]]
                         inv_box = np.array(inv_box, dtype=np.float32).reshape((-1, 1, 2))
                         inv_box = cv2.perspectiveTransform(inv_box, np.linalg.inv(M))
-                        # inv_box[:, :, 0] += x_min
-                        # inv_box[:, :, 1] += y_min
                         inv_box = inv_box.astype(np.int32)
                         x1, y1, x2, y2 = quad_coords_to_xyxy(inv_box.squeeze(1).tolist())
                         list_box.append((x1, y1, x2, y2))
@@ -263,43 +245,6 @@ class ImageReader():
                             box[i][0] += x_min
                             box[i][1] += y_min
                         list_box.append((x_min + x,y_min + y,x_min + x_m,y_min+y_m))
-
-        result = detect_chalk_text(img, self.ocr)
-        for box in result[0]:
-            x, y, x_m, y_m = quad_coords_to_xyxy(box)
-            text_width, text_height = x_m - x, y_m - y
-
-            if left_polygon.contains(Point((x+x_m)/2, (y+y_m)/2)):
-                x1, y1 = int(max(0, x-text_width*0.5)), int(max(0, y-text_height*0.5))
-                x2, y2 = int(x_m + text_width*0.5), int(y_m + text_height*0.3)
-                textImg = img[y1:y2, x1:x2]
-                textImg = rotate_image(textImg, 135)
-                r_h, r_w = textImg.shape[:2]
-                # cv2.imwrite(f"./crop/text/{time.time()}.jpg", textImg)
-                textImg = textImg[r_h//10:-r_h//2]
-            elif right_polygon.contains(Point((x+x_m)/2, (y+y_m)/2)):
-                x1, y1 = int(max(0, x-text_width*0.5)), int(max(0, y-text_height*0.5))
-                x2, y2 = int(x_m + text_width*0.5), int(y_m + text_height*0.5)
-                textImg = img[y1:y2, x1:x2]
-                textImg = rotate_image(textImg, -135)
-            else:
-                textImg = img[int(y):int(y_m), int(x):int(x_m)]
-            images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
-            list_box.append((x, y, x_m, y_m))
-            
-            if (use_rotate_on_every_image):
-                textImg = img[int(y):int(y_m), int(x):int(x_m)]
-                images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
-                list_box.append((x, y, x_m, y_m))
-                
-            if (use_extend_on_every_image):
-                x1, y1 = int(max(0, x-text_width*0.5)), int(max(0, y-text_height*0.5))
-                x2, y2 = int(x_m + text_width*0.5), int(y_m + text_height*0.3)
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(x1, img_W), min(y2, img_H)
-                textImg = img[y1:y2, x1:x2]
-                images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
-                list_box.append((x, y, x_m, y_m))
 
         if len(images) > 0:
             images = torch.stack(images).to(self.args.device)
@@ -312,38 +257,21 @@ class ImageReader():
                 pred, p = self.model.tokenizer.decode(p, text_threshold=0.5)
             scores = ([s.cpu().mean().item() for s in p])
             texts = pred
-            # std_probs = []
-            # for img_id in range(len(scores)):
-            #     text = texts[img_id]
-            #     prob = p[img_id]
-            #     valid_token_ids = [token_id for token_id in range(len(text))
-            #                        if prob[token_id] > 0.5]
-            #     prob = [prob[token_id] for token_id in valid_token_ids]
-            #     std_prob = np.array(prob).std()
-            #     std_probs.append(std_prob)
-            #     text = [text[token_id] for token_id in valid_token_ids]
-            #     text = "".join(text)
-            # std_probs = [np.array(s).std() for s in p]
             print(scores)
         print("output texts: ", texts)
 
         tensor_boxes = torch.Tensor(list_box)
         scores = torch.Tensor(scores)
         roi_indices = nms(tensor_boxes, scores, 0.3).numpy()
-        # print(tensor_boxes.shape, scores.shape)
-        # roi_indices = list(range(len(scores)))
 
         full_screen = [[x * img_W, y * img_H] for (x, y) in full_screen]
+        filtered_indices = []
         screen_polygon = Polygon(full_screen)
         for idx in roi_indices:
             text = texts[idx]
             x_min, y_min, x_max, y_max = list_box[idx]
             
-            # if scores[idx] < 0.7:
-            #     continue
-            # if std_probs[idx] > 0.1:
-            #     continue
-            if scores[idx] < 0.9:
+            if scores[idx] < 0.85:
                 continue
             if len(text) > self.max_length_text:
                 continue
@@ -357,6 +285,14 @@ class ImageReader():
             if not screen_polygon.contains(point) and scores[idx] < 0.95:
                 continue
             
+            filtered_indices.append(idx)
+        filtered_list_boxes = [list_box[idx] for idx in filtered_indices]
+        filtered_list_texts = [texts[idx] for idx in filtered_indices]
+        intersect_indices = remove_box_by_intersect_ratio(filtered_list_boxes)
+        print(filtered_list_boxes)
+        for idx in intersect_indices:
+            x_min, y_min, x_max, y_max = filtered_list_boxes[idx]
+            text = filtered_list_texts[idx]
             if digit_before_dot > 0:
                 if "." or "," in text:
                     output_text = "".join([char for char in text if char.isdigit()])
