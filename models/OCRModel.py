@@ -318,8 +318,20 @@ class ImageReader():
                     if len(output_text) > digit_before_dot:
                         output_text = output_text[:digit_before_dot] + "." + output_text[digit_before_dot:]
                         text = output_text
+
+            font_size = img_H//400
+            thickness = img_H//160
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            (text_width, text_height), baseline = cv2.getTextSize(text, font, font_size, thickness)
+
             cv2.rectangle(drawImg, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (0, 255, 0), 10)
-            cv2.putText(drawImg, text, (int(x_min),int(y_min)), cv2.FONT_HERSHEY_SIMPLEX, 10, (0, 0, 255), img_H//160,
+
+            if x_min + text_width > drawImg.shape[1]:
+                x_min = drawImg.shape[1] - text_width
+            if y_min + text_height > drawImg.shape[0]:
+                y_min = drawImg.shape[0] - text_height
+            
+            cv2.putText(drawImg, text, (int(x_min),int(y_min)), font, font_size, (0, 0, 255), thickness,
                         bottomLeftOrigin=False)
         
         drawImg = cv2.resize(drawImg, (0,0), fx=0.5, fy=0.5)
