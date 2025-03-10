@@ -36,6 +36,7 @@ def rotate_image(image, angle):
   return result
 
 
+
 class ImageReader():
 
     def __init__(self):
@@ -44,7 +45,7 @@ class ImageReader():
                              rec_char_dict_path="./chalk_font_hwjp_number_PP-OCRv3_inference/dict.txt",
                              det_model_dir="./paddle_models/det/red_chalk_PP-OCR_v3_det_inference/Student",
                              det_db_thresh=0.3,
-                             det_db_box_thresh=0.5)
+                             det_db_box_thresh=0.3)
         parser = argparse.ArgumentParser()
         
         # parser.add_argument('--images', nargs='+', help='Images to read')
@@ -171,6 +172,12 @@ class ImageReader():
         print(infos)
         
         img = bytes_to_ndarray(imageFileBytes)
+        MIN_WIDTH = 4000
+        if img.shape[1] < MIN_WIDTH:
+            img_H, img_W = img.shape[:2]
+            ratio = MIN_WIDTH / img_W
+            img = cv2.resize(img, (None, None), fx=ratio, fy=ratio)
+
         drawImg = img.copy()
         img_H, img_W = img.shape[:2]
         positions = np.array(screen_boxes)
@@ -217,21 +224,32 @@ class ImageReader():
             else:
                 cropImg = img[y:y+height, x:x+width]
 
-            cv2.imwrite(f"./crop/crop/{i}.png", cropImg)
-            result = detect_chalk_text(cropImg, self.ocr, threshold=100)
+            cv2.imwrite(f"./results/crop/{i}.png", cropImg)
+
+            if is_rotated:
+                result = detect_chalk_text(cropImg, self.ocr, threshold=100, height_threshold=100)
+            elif mode == '2' and i == 1:
+                result = detect_chalk_text(cropImg, self.ocr, threshold=180, height_threshold=80)
+            else:
+                result = detect_chalk_text(cropImg, self.ocr, threshold=100, height_threshold=100)
+                
+            print(f"{i}: {result}")
 
             if len(result[0]) == 0:
                 images.append(self.img_transform(Image.fromarray(cropImg, 'RGB')))
                 list_box.append((x_min,y_min,x_max,y_max))
             else:
                 for box in result[0]:
-                    x,y,x_m,y_m = quad_coords_to_xyxy(box)
-                    y = int(y - (y_m - y) * 0.1)
-                    y_m = int(y_m + (y_m - y) * 0.1)
-                    x = int(x - (x_m - x) * 0.1)
-                    x_m = int(x_m + (x_m - x) * 0.1)
-                    
-                    textImg = cropImg[int(y):int(y_m), int(x):int(x_m)]
+                    l, t, w, h = cv2.boundingRect(np.array(box, dtype=np.int32).reshape((-1, 1, 2)))
+                    x = max(0, int(l - w * 0.1))
+                    y = max(0, int(t - h * 0.1))
+                    x_m = min(cropImg.shape[1], int(l + w * 1.1))
+                    y_m = min(cropImg.shape[0], int(y + h * 1.1))
+
+                    textImg = cropImg[y:y_m, x:x_m]
+                    import time
+                    cv2.imwrite(f"/home/hieu/hieunm/Paddle_parseq/results/textImg_api/{time.time()}.jpg",
+                                textImg)
                     images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
                     if is_rotated:
                         inv_box = [[x, y], [x_m, y], [x_m, y_m], [x, y_m]]
@@ -271,14 +289,14 @@ class ImageReader():
             text = texts[idx]
             x_min, y_min, x_max, y_max = list_box[idx]
             
-            if scores[idx] < 0.85:
+            if scores[idx] < 0.9:
                 continue
             if len(text) > self.max_length_text:
                 continue
             is_contain_number = any([c for c in text if c.isdigit()])
             if not is_contain_number:
                 continue
-            if x_max - x_min > img_W * 0.3 or y_max - y_min > img_H * 0.3:
+            if (x_max - x_min > img_W * 0.3) or (y_max - y_min > img_H * 0.5):
                 continue
 
             point = Point((x_min+x_max)/2 - (x_max-x_min)*0.1, (y_min+y_max)/2 - (y_max-y_min)*0.1)
@@ -289,7 +307,8 @@ class ImageReader():
         filtered_list_boxes = [list_box[idx] for idx in filtered_indices]
         filtered_list_texts = [texts[idx] for idx in filtered_indices]
         intersect_indices = remove_box_by_intersect_ratio(filtered_list_boxes)
-        print(filtered_list_boxes)
+        # intersect_indices = range(len(filtered_list_boxes))
+        # print(filtered_list_boxes)
         for idx in intersect_indices:
             x_min, y_min, x_max, y_max = filtered_list_boxes[idx]
             text = filtered_list_texts[idx]
@@ -308,6 +327,6 @@ class ImageReader():
         pil_image = Image.fromarray(drawImg)
         bytes_image = io.BytesIO()
         pil_image.save(bytes_image, format='PNG')
+        print(drawImg.shape)
 
         return bytes_image.getvalue()
-            

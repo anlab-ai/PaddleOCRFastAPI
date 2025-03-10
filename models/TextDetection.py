@@ -13,6 +13,7 @@ from shapely import intersection, intersects
 
 def binarize_img(cropImg: cv2.Mat):
     h, s, v = cv2.split(cv2.cvtColor(cropImg, cv2.COLOR_BGR2HSV))
+    cv2.imwrite("../results/hue/hue.jpg", s)
     _, img_bin = cv2.threshold(s, 20, 255, cv2.THRESH_BINARY)
     return img_bin
 
@@ -60,7 +61,7 @@ def remove_box_by_intersect_ratio(boxes):
     return indices
 
 
-def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=80):
+def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=100, height_threshold=30):
     img_gray = cv2.cvtColor(cropImg, cv2.COLOR_BGR2GRAY)
     # img_bin = cv2.ximgproc.niBlackThreshold(img_gray, 255, cv2.THRESH_BINARY_INV, 31, 0.1, 
     #                                         binarizationMethod=cv2.ximgproc.BINARIZATION_WOLF)
@@ -85,26 +86,32 @@ def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=80):
         filtered_contour_boxes = np.array(filtered_contour_boxes) # shape nx4
         filtered_contour_boxes[:, 2] += filtered_contour_boxes[:, 0]
         filtered_contour_boxes[:, 3] += filtered_contour_boxes[:, 1]
+        filtered_contour_cy = (filtered_contour_boxes[:, [3]] + filtered_contour_boxes[:, [1]]) / 2
 
-        right_top_to_left_top_dist = (filtered_contour_boxes[:, [0]] - filtered_contour_boxes[:, [2]].T) ** 2 +\
-                                    (filtered_contour_boxes[:, [1]] - filtered_contour_boxes[:, [1]].T) ** 2
-        right_bottom_to_right_top_dist = (filtered_contour_boxes[:, [2]] - filtered_contour_boxes[:, [2]].T) ** 2 +\
-                                        (filtered_contour_boxes[:, [3]] - filtered_contour_boxes[:, [1]].T) ** 2
+        box_left = filtered_contour_boxes[:, [0]]
+        box_top = filtered_contour_boxes[:, [1]]
+        box_right = filtered_contour_boxes[:, [2]]
+        box_bottom = filtered_contour_boxes[:, [3]]
+        
+        right_top_to_left_top_dist = np.minimum((box_left - box_right.T) ** 2 + (box_top - box_top.T) ** 2,
+                                                (box_right - box_left.T) ** 2 + (box_top - box_top.T) ** 2)
+        right_bottom_to_right_top_dist = np.minimum((box_right - box_right.T) ** 2 + (box_bottom - box_top.T) ** 2,
+                                                    (box_right - box_right.T) ** 2 + (box_top - box_bottom.T) ** 2)
+        height_distance = np.abs(filtered_contour_cy - filtered_contour_cy.T)
+        is_same_group = (right_top_to_left_top_dist < threshold ** 2) | (right_bottom_to_right_top_dist < 180 ** 2)
+        is_same_group = is_same_group & (height_distance < height_threshold)
 
-        # is_same_group = center_distance < 80 # 100 ** 2 + 50 ** 2
-        is_same_group = (right_top_to_left_top_dist < threshold ** 2) | (right_bottom_to_right_top_dist < threshold ** 2)
         is_same_group = csr_array(is_same_group)
         n_components, labels = connected_components(is_same_group, directed=False)
 
         for label_idx in range(n_components):
             group_contours = [filtered_contours[i] for i in range(len(filtered_contours)) if labels[i] == label_idx]
-            # color = np.random.choice(range(256), 3).tolist()
             group_box = cv2.boundingRect(np.concatenate(group_contours))
             text_boxes.append(group_box)
-            # cv2.rectangle(cropImg, (group_box[0], group_box[1]), (group_box[0] + group_box[2], group_box[1] + group_box[3]), (0, 255, 0), 3)
 
     # detect by paddleocr
     result = ocr.ocr(cropImg, cls=False, rec=False)
+    # result = ocr.ocr(cv2.cvtColor(img_bin, cv2.COLOR_GRAY2BGR), cls=False, rec=False)
 
     # group box
     box_left, box_right, box_top, box_bottom = [], [], [], []
@@ -165,9 +172,9 @@ def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=80):
     #     x1, y1, x2, y2 = list(map(int, (x1, y1, x2, y2)))
     #     cv2.rectangle(cropImg, (x1, y1), (x2+x1, y2+y1), (0, 0, 255), 3)
     # import time
-    # cv2.imwrite(f"./crop/output_full/{time.time()}.jpg", cropImg)
-    print("Text boxes: ", text_boxes)
-    print("Group text boxes", group_text_boxes)
+    # cv2.imwrite(f"/home/hieu/hieunm/Paddle_parseq/results/detect_step/{time.time()}.jpg", cropImg)
+    # print("Text boxes: ", text_boxes)
+    # print("Group text boxes", group_text_boxes)
 
     if len(group_text_boxes) > 0:
         filtered_text_boxes = []
@@ -184,7 +191,6 @@ def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=80):
         text_tensor[:, 3] += text_tensor[:, 1]
         
         intersection = compute_intersection_numpy(text_tensor, group_tensor)
-        # intersection_over_area = intersection / text_area
         rows, cols = np.where(intersection > 0.7)
         rows = list(set(rows.tolist()))
         # for row_idx in rows:
@@ -201,7 +207,7 @@ def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=80):
     roi_indices = list(range(len(filtered_text_boxes)))
     for idx in roi_indices:
         x1, y1, x2, y2 = filtered_text_boxes[idx]
-        if x2 < 40 or y2 < 40:
+        if (x2 < 40) or (y2 < 40) or (x2 / cropImg.shape[1] > 0.95) or (y2 / cropImg.shape[0] > 0.95):
             continue
         x2 += x1
         y2 += y1
