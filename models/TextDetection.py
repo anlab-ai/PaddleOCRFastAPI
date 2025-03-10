@@ -176,7 +176,7 @@ def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=100, height_threshold=30)
     # print("Text boxes: ", text_boxes)
     # print("Group text boxes", group_text_boxes)
 
-    if len(group_text_boxes) > 0:
+    if len(group_text_boxes) > 0 and len(text_boxes) > 0:
         filtered_text_boxes = []
         filtered_text_boxes.extend(group_text_boxes)
         group_tensor = np.array(group_text_boxes)
@@ -186,7 +186,8 @@ def detect_chalk_text(cropImg: cv2.Mat, ocr, threshold=100, height_threshold=30)
         group_tensor[:, 3] += group_tensor[:, 1]
         
         text_tensor = np.array(text_boxes)
-        text_area = text_tensor[:, [2]] * text_tensor[:, [3]]
+        if len(text_tensor) == 1:
+            text_tensor = text_tensor.reshape((1, -1))
         text_tensor[:, 2] += text_tensor[:, 0]
         text_tensor[:, 3] += text_tensor[:, 1]
         
