@@ -488,7 +488,7 @@ class DBSCAN(ClusterMixin, BaseEstimator):
 
 class DBScanPhuoc:
 	def __init__(self,**kwargs):
-		super(DBScanPhuoc, self).__init__(**kwargs)
+		# super(DBScanPhuoc, self).__init__(**kwargs)
 		self.eps = 0.045# Adjust this value as needed (in normalized units)
 		self.min_samples = 2 # Adjust this value as needed
 		self.dbscan = DBSCAN(eps=self.eps, min_samples=self.min_samples)

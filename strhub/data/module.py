@@ -75,7 +75,7 @@ class SceneTextDataModule(pl.LightningDataModule):
         if rotation:
             transforms.append(lambda img: img.rotate(rotation, expand=True))
         transforms.extend([
-            T.Resize(img_size, T.InterpolationMode.BICUBIC),
+            T.Resize(img_size),
             T.ToTensor(),
             T.Normalize(0.5, 0.5),
         ])

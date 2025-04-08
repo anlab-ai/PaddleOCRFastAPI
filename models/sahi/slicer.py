@@ -273,7 +273,8 @@ class SliceImage:
 	def __init__(self,
 				 slice_height, 
 				 slice_width,
-	 			 overlap):
+	 			 overlap,
+      			 **kwargs):
 		self.slice_height = slice_height
 		self.slice_width = slice_width
 		self.overlap = overlap

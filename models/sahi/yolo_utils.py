@@ -1,7 +1,8 @@
 import copy
 import numpy as np
 import torch
-
+import cv2
+import os
 
 def gether_list_polys(results):
 	return [p['points'] for p in results]
@@ -11,7 +12,9 @@ def process_in_batches_yolo(images_preprocessed,
 					   merger,
 					   locations,
 					   batch_size=40,
-					   conf=0.3, iou=0.8):
+					   conf=0.3,
+        			   iou=0.8,
+                       device = None):
 	"""
 	Process images in smaller batches for inference and merging.
 	
@@ -38,7 +41,7 @@ def process_in_batches_yolo(images_preprocessed,
 		# Stack into NumPy arrays for the current batch
 		# Run inference
 		with torch.no_grad():
-			results = model(batch_images, conf=conf, iou=iou)
+			results = model(batch_images, conf=conf, iou=iou, device=device, verbose=False)
 
 		confidences = [result.obb.conf.cpu().numpy() for result in results]
 		post_result = [result.obb.xyxyxyxy.cpu().numpy() for result in results]
@@ -55,3 +58,11 @@ def process_in_batches_yolo(images_preprocessed,
 
 	# return final_box, final_confidences
 	return final_box, final_confidences
+
+def draw_polygons(dt_boxes, img,color = (255, 255, 0)):
+
+
+	for box in dt_boxes:
+		box = np.array(box).astype(np.int32).reshape((-1, 1, 2))
+		cv2.polylines(img, [box], True, color, thickness=2)
+	return img

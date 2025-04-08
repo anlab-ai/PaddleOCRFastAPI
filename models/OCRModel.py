@@ -19,6 +19,10 @@ from PIL import Image
 import io
 import cv2
 import re
+from loguru import logger
+
+from ultralytics.utils.ops import xyxyxyxy2xywhr,xywhr2xyxyxyxy
+from .sahi.sahi_phuoc import YOLO_SAHI
 
 
 class OCRModel(BaseModel):
@@ -37,281 +41,351 @@ def rotate_image(image, angle):
 
 
 
+def flip_vertical(img):
+	h,w,_ = img.shape
+	src = np.array([
+				[0, 0],
+				[w - 1, 0],
+				[w - 1, h - 1],
+				[0, h - 1]
+			], dtype=np.float32)
+ 
+	dst = np.array([
+				[0, h - 1],
+				[w - 1, h - 1],
+				[w - 1, 0],
+				[0, 0],
+			], dtype=np.float32)
+	M = cv2.getPerspectiveTransform(src, dst)
+
+	# Check if transformation matrix is valid
+	if M is None:
+		raise ValueError("Failed to compute perspective transform matrix")
+		
+	# Apply perspective transform with border handling
+	warped = cv2.warpPerspective(
+		img, 
+		M, 
+		(w, h),
+		flags=cv2.INTER_LINEAR,
+		borderMode=cv2.BORDER_CONSTANT,
+		borderValue=(0, 0, 0)  # Black border for out-of-bounds areas
+	)
+	return warped
+def flip_left(img):
+	h,w,_ = img.shape
+	src = np.array([
+				  	[0, 0],        # top-left
+					[w - 1, 0],    # top-right
+					[w - 1, h - 1], # bottom-right
+					[0, h - 1] 
+			], dtype=np.float32)
+ 
+	dst = np.array([
+				[0, w-1],
+				[0,0],
+				[h-1,0],
+				[h-1,w-1],
+				
+			], dtype=np.float32)
+	M = cv2.getPerspectiveTransform(src, dst)
+
+	# Check if transformation matrix is valid
+	if M is None:
+		raise ValueError("Failed to compute perspective transform matrix")
+		
+	# Apply perspective transform with border handling
+	warped = cv2.warpPerspective(
+		img, 
+		M, 
+		(h, w),
+		flags=cv2.INTER_LINEAR,
+		borderMode=cv2.BORDER_CONSTANT,
+		borderValue=(0, 0, 0)  # Black border for out-of-bounds areas
+	)
+	return warped
+def flip_right(img):
+
+   
+	# Get original dimensions
+	h, w, _ = img.shape
+	
+	# Source points (original corners)
+	src = np.array([
+		[0, 0],        # top-left
+		[w - 1, 0],    # top-right
+		[w - 1, h - 1], # bottom-right
+		[0, h - 1]      # bottom-left
+	], dtype=np.float32)
+	
+	# Destination points for 90° clockwise rotation
+	# Mapped to new dimensions (h, w)
+	dst = np.array([
+		[h - 1, 0],    # new top-right
+		[h - 1, w - 1], # new bottom-right
+		[0, w - 1],     # new bottom-left
+		[0, 0]          # new top-left
+	], dtype=np.float32)
+	
+	# Compute transformation matrix
+	M = cv2.getPerspectiveTransform(src, dst)
+ 
+	# Apply transform with new dimensions
+	rotated = cv2.warpPerspective(
+		img,
+		M,
+		(h, w),  # New width = old height, new height = old width
+		flags=cv2.INTER_LINEAR,
+		borderMode=cv2.BORDER_CONSTANT,
+		borderValue=(0, 0, 0)
+	)
+	return rotated
+
+class Rotator:
+	alpha = 1.7
+	@staticmethod
+	def get_rotate_images(original_image):
+		h, w, _ = original_image.shape
+		rotated_images = [
+			original_image.copy(),
+			flip_vertical(np.copy(original_image)),
+			flip_left(np.copy(original_image)),
+			flip_right(np.copy(original_image)),
+		]
+		return rotated_images
+
+def get_max_width_height(rect):
+	"""Tính chiều rộng và chiều cao tối đa của hình chữ nhật"""
+	widthA = np.linalg.norm(rect[2] - rect[3])  # BR - BL
+	widthB = np.linalg.norm(rect[1] - rect[0])  # TR - TL
+	maxWidth = int(max(widthA, widthB))
+
+	heightA = np.linalg.norm(rect[1] - rect[2])  # TR - BR
+	heightB = np.linalg.norm(rect[0] - rect[3])  # TL - BL
+	maxHeight = int(max(heightA, heightB))
+
+	return maxWidth, maxHeight
+def order_points(pts):
+	
+	"""Sắp xếp 4 điểm theo thứ tự: [TL, TR, BR, BL]"""
+	pts = pts[np.argsort(pts[:, 0])]  # Sắp xếp theo tọa độ x
+	left_pts, right_pts = pts[:2], pts[2:]
+	
+	# Xác định top-left và bottom-left theo y
+	left_pts = left_pts[np.argsort(left_pts[:, 1])]
+	right_pts = right_pts[np.argsort(right_pts[:, 1])]
+	
+	rect = np.array([left_pts[0], right_pts[0], right_pts[1], left_pts[1]], dtype=np.float32)
+	return rect
+
+def crop_region(image, rect):
+
+	"""Cắt ảnh theo bounding box của polygon và cập nhật tọa độ điểm"""
+	x_min, y_min = np.min(rect, axis=0).astype(int)
+	x_max, y_max = np.max(rect, axis=0).astype(int)
+	cropped = image[y_min:y_max, x_min:x_max].copy()
+	
+	# Cập nhật lại tọa độ điểm cho ảnh đã cắt
+	new_rect = rect - np.array([x_min, y_min]).reshape(1,2)
+	return cropped, np.array(np.clip(new_rect, [0, 0], [image.shape[1], image.shape[0]]),np.float32)
+
+def perspective_transform(image, pts):
+	"""
+	Cắt và biến đổi phối cảnh một vùng trong ảnh thành hình chữ nhật.
+	Args:
+		image: Input image (numpy array)
+		pts: Array of points defining the region to transform
+	Returns:
+		warped: Transformed rectangular image
+	"""
+	try:
+		# Check if input is valid
+		if image is None or pts is None:
+			raise ValueError("Image or points cannot be None")
+		
+		if len(pts) != 4:
+			raise ValueError("Exactly 4 points are required for perspective transform")
+			
+		# Convert points to numpy array if not already
+		pts = np.array(pts, dtype=np.float32)
+		
+		# Order points and get dimensions
+		polygons = order_points(pts)
+		maxWidth, maxHeight = get_max_width_height(polygons)
+		
+		# Handle case where dimensions are invalid
+		if maxWidth <= 0 or maxHeight <= 0:
+			raise ValueError("Invalid dimensions calculated for transformation")
+			
+		# Crop the region with safety checks
+		cropped_image, polygons = crop_region(image, polygons)
+		if cropped_image is None or cropped_image.size == 0:
+			raise ValueError("Failed to crop region from image")
+			
+		# Define destination points
+		dst = np.array([
+			[0, 0],
+			[maxWidth - 1, 0],
+			[maxWidth - 1, maxHeight - 1],
+			[0, maxHeight - 1]
+		], dtype=np.float32)
+		
+		# Calculate perspective transform matrix
+		M = cv2.getPerspectiveTransform(polygons, dst)
+		
+		# Check if transformation matrix is valid
+		if M is None:
+			raise ValueError("Failed to compute perspective transform matrix")
+			
+		# Apply perspective transform with border handling
+		warped = cv2.warpPerspective(
+			cropped_image, 
+			M, 
+			(maxWidth, maxHeight),
+			flags=cv2.INTER_LINEAR,
+			borderMode=cv2.BORDER_CONSTANT,
+			borderValue=(0, 0, 0)  # Black border for out-of-bounds areas
+		)
+		
+		# Verify output
+		if warped is None or warped.size == 0:
+			raise ValueError("Perspective transformation failed")
+			
+		return warped
+		
+	except Exception as e:
+		print(f"Error in perspective_transform: {str(e)}")
+		return None
+
 class ImageReader():
 
     def __init__(self):
-        self.ocr = PaddleOCR(use_angle_cls=False, lang='japan', 
-                             rec_model_dir="./chalk_font_hwjp_number_PP-OCRv3_inference", 
-                             rec_char_dict_path="./chalk_font_hwjp_number_PP-OCRv3_inference/dict.txt",
-                             det_model_dir="./paddle_models/det/red_chalk_PP-OCR_v3_det_inference/Student",
-                             det_db_thresh=0.3,
-                             det_db_box_thresh=0.3)
         parser = argparse.ArgumentParser()
         
         # parser.add_argument('--images', nargs='+', help='Images to read')
         parser.add_argument('--device', default='cpu')
         self.args, unknown = parser.parse_known_args()
         kwargs = {} #parse_model_args(unknown)
-        # kwargs["model"] = dict()
-        # kwargs['model']['charset_test'] = "0123456789"
-        # print(kwargs)
-        # print(f'Additional keyword arguments: {kwargs}')
-        # self.model_plate_no = load_from_checkpoint('parseq_rec_model/parseq_plate_no_2024_09_13.ckpt', **kwargs).eval().to(self.args.device)
-        self.model = load_from_checkpoint('parseq_rec_model/parseq-2024_05_19.ckpt', **kwargs).eval().to(self.args.device)
-        # self.model_writer_1 = load_from_checkpoint('parseq_rec_model/parseq_writer_1.ckpt', **kwargs).eval().to(self.args.device)
-        # print(f'model_writer_1: parseq_rec_model/parseq_writer_1.ckpt')
+        self.model = load_from_checkpoint('parseq_rec_model/epoch29-step2879-val_accuracy94.1581-val_NED97.7690.ckpt', **kwargs).eval().to(self.args.device)
         self.img_transform = SceneTextDataModule.get_transform(self.model.hparams.img_size)
         self.max_length_text = 10
-        
+        self.detection_model = YOLO_SAHI(
+            model_path="parseq_rec_model/best.pt",
+            confidence_threshold=0.35,
+            device=self.args.device,
+            slice_height = 840,
+            slice_width = 840,
+            overlap = 0.3,
+            iou_merge_sahi = 0.55
+        )
 
-    def DetectTextBox(self, imageFileBytes):
-        img = bytes_to_ndarray(imageFileBytes)
-        formRatio = 480.0 / img.shape[1]
-        img = cv2.resize(img, (0,0), fx=formRatio, fy=formRatio)
-        result = self.ocr.ocr(img=img, cls=False, rec=False)
-        for i in range(len(result)):
-            boxes = result[i]
-            for j in range(len(boxes)):
-                box = boxes[j]
-                for k in range(len(box)):
-                    point = box[k]
-                    point[0] /= formRatio
-                    point[1] /= formRatio
-                    box[k] = point
-                boxes[j] = box
-            result[i] = boxes
- 
-        print("result: ", result)
-        return result
-    
-    def ReadImageWithPos(self, imageFileBytes, configs, items):
-        img = bytes_to_ndarray(imageFileBytes)
-        orgImg = img.copy()
-        drawImg = orgImg.copy()
-        boxes = items[0]
-        for i in range(len(boxes)):
-            boxes[i] = (quad_coords_to_xyxy(boxes[i]))
-        boxes = mergeLine(boxes)
+    def recognize_single_text(self, image: np.ndarray):
+        transform_image = [self.img_transform(Image.fromarray(image, "RGB"))]
+        inputs = torch.stack(transform_image).to(self.args.device)
+        with torch.no_grad():
+            p = self.model(inputs)
+            p =  torch.softmax(p, dim=2)
+            # p[:, :, 11:73] = 0
+            # p[:, :, 75:76] = 0
+            # p[:, :, 77:] = 0
+            text, p = self.model.tokenizer.decode(p)
+        score = ([s.cpu().mean().item() for s in p])
+        return text[0], score[0]
 
-        txts = []
-        origBoxes = []
-        for i in range(len(boxes)):
-            x_min,y_min,x_max,y_max = boxes[i]
-            w,h = x_max-x_min,y_max-y_min
-            externRatio = 0.1
-            x = max(0, x_min - int(w*externRatio*0.5))
-            y = max(0, y_min - int(h*externRatio*0.5))
-            w += int(w*externRatio)
-            origBoxes.append([int(x),int(y),int((x + w)),int((y + h))])
-            textImg = orgImg[origBoxes[i][1]:origBoxes[i][3], origBoxes[i][0]:origBoxes[i][2]]
-            
-            grayImg = cv2.cvtColor(textImg, cv2.COLOR_BGR2GRAY)
-            T, binImg = cv2.threshold(grayImg, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-            textImg = binImg
-            result = self.ocr.ocr(img=textImg, cls=False, det=False)
-            print("result: ", result)
-            txts.append(result[0][0][0])
-        result_txts = txts
-        result_boxs = origBoxes
-        if len(configs) > 0:
-            result_txts = []
-            result_boxs = []
-            numberDigits = configs["total_digit"]
-            numberDigitBeforeDot = configs["digit_before_dot"]
-            for i in range(len(txts)):
-                text = txts[i]
-                text = re.sub("[\D]", "", text)
-                if len(text) == numberDigits or numberDigits == 0:
-                    if numberDigitBeforeDot > 0 and numberDigitBeforeDot < len(text):
-                        text = text[:numberDigitBeforeDot] + '.' + text[numberDigitBeforeDot:]
-                    result_txts.append(text)
-                    result_boxs.append(origBoxes[i])
-        drawImg = drawResult(drawImg, result_boxs, result_txts)
-        array = cv2.cvtColor(np.array(drawImg), cv2.COLOR_RGB2BGR)
-        im_show = Image.fromarray(array, mode="RGB")
-        bytes_image = io.BytesIO()
-        im_show.save(bytes_image, format='PNG')
+    def recognize_text(self, images: list[np.ndarray]):
+        texts, scores = [], []
+        transform_images = []
+        for img_crop in images:
+            # logger.info("Start predict for image")
+            # transform_image = [
+            #     img_crop.copy(),
+            #     cv2.rotate(img_crop.copy(), cv2.ROTATE_90_CLOCKWISE),
+            #     cv2.rotate(img_crop.copy(), cv2.ROTATE_180),
+            #     cv2.rotate(img_crop.copy(), cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # ]
+            transform_image = Rotator.get_rotate_images(img_crop)
+            text = []
+            score = []
+            for image in transform_image:
+                pred, conf = self.recognize_single_text(image)
+                text.append(pred)
+                score.append(conf)
+            # logger.info("Rotate success")
+            # transform_image = [self.img_transform(Image.fromarray(img, "RGB")) for img in transform_image]
+            # transform_image = [self.img_transform(Image.fromarray(img, "RGB")) for img in transform_image]
+            # transform_images.extend(transform_image)
 
-        return bytes_image.getvalue()
-    
+            # inputs = torch.stack(transform_image).to(self.args.device)
+            # logger.info("Preprocess success")
+            # with torch.no_grad():
+            #     p = self.model(inputs)
+            #     p =  torch.softmax(p, dim=2)
+            #     # p[:, :, 11:73] = 0
+            #     # p[:, :, 75:76] = 0
+            #     # p[:, :, 77:] = 0
+            #     text, p = self.model.tokenizer.decode(p)
+            # score = ([s.cpu().mean().item() for s in p])
+            max_idx = np.argmax(score)
+            logger.info("Predict success")
+            texts.append(text[max_idx])
+            scores.append(score[max_idx])
+
+        # inputs = torch.stack(transform_images).to(self.args.device)
+        # logger.info("Load image success")
+        # with torch.no_grad():
+        #     p = self.model(inputs)
+        #     p =  torch.softmax(p, dim=2)
+        #     # p[:, :, 11:73] = 0
+        #     # p[:, :, 75:76] = 0
+        #     # p[:, :, 77:] = 0
+        #     preds, p = self.model.tokenizer.decode(p)
+        #     confs = ([s.cpu().mean().item() for s in p])
+        #     logger.info("Predict success")
+
+        # logger.info(f"Predict results: {preds}")
+
+        # n_boxes = len(images)
+        # for idx in range(n_boxes):
+        #     text = preds[idx*4:idx*4+4]
+        #     score = confs[idx*4:idx*4+4]
+        #     max_idx = np.argmax(score)
+        #     texts.append(text[max_idx])
+        #     scores.append(score[max_idx])
+        return texts, scores
+
     def ReadImageWithMode(self, imageFileBytes, mode, infos: str):
-        if mode == '1':
-            full_screen = [[0.3575, 0.05], [1-0.3575, 0.05], [1-0.025, 1-0.05], [0.025, 1-0.05]]
-            # 9 box
-            screen_boxes = [
-                [[0.375000, 0.358185], [0.602700, 0.358185], [0.602700, 0.529947], [0.375000, 0.529947]],
-                [[0.375000, 0.543416], [0.611600, 0.543416], [0.611600, 0.738968], [0.375000, 0.738968]],
-                [[0.141850, 0.701957], [0.399400, 0.701957], [0.399400, 0.980605], [0.141850, 0.980605]],
-                [[0.613500, 0.712989], [0.858330, 0.712989], [0.858330, 0.996441], [0.613500, 0.996441]],
-                [[0.386906, 0.290877], [0.280316, 0.588586], [0.150004, 0.440866], [0.256594, 0.143158]],
-                [[0.248342, 0.615558], [0.109714, 0.985423], [-0.012192, 0.840758], [0.126436, 0.470894]],
-                [[0.693036, 0.572700], [0.588607, 0.286567], [0.732104, 0.120752], [0.836533, 0.406885]],
-                [[0.772091, 0.788536], [0.684189, 0.546764], [0.836429, 0.371518], [0.924331, 0.613289]],
-                [[0.895896, 1.047910], [0.770612, 0.703322], [0.896194, 0.558763], [1.021478, 0.903350]]
-            ]
-            left_idx = 0
-            right_idx = 6
-        elif mode == '2':
-            full_screen = [[0.25, 0], [1-0.25, 0], [1-0.025, 1-0.05], [0.025, 1-0.05]]
-            # 5 box
-            screen_boxes = [
-                [[0.451769, 0.048466], [0.235031, 0.993690], [0.007846, 0.901081], [0.224584, -0.044144]],
-                [[0.364600, 0.011600], [0.642000, 0.011600], [0.642000, 0.868067], [0.364600, 0.868067]],
-                [[0.073650, 0.787067], [0.383800, 0.787067], [0.383800, 0.998600], [0.073650, 0.998600]],
-                [[0.600350, 0.782607], [0.946200, 0.782607], [0.946200, 0.998600], [0.600350, 0.998600]],
-                [[0.808787, 0.972856], [0.589139, 0.049634], [0.815283, -0.046016], [1.034931, 0.877206]]
-            ]
-            left_idx = 0
-            right_idx = 4
+        logger.info("Start read image")
         infos = json.loads(infos)
         total_digit = int(infos.get("total_digit", 0))
         digit_before_dot = int(infos.get("digit_before_dot", 0))
-        use_rotate_on_every_image = True
-        use_extend_on_every_image = True
-            
-        print(infos)
-        
-        img = bytes_to_ndarray(imageFileBytes)
-        MIN_WIDTH = 4000
-        if img.shape[1] < MIN_WIDTH:
-            img_H, img_W = img.shape[:2]
-            ratio = MIN_WIDTH / img_W
-            img = cv2.resize(img, (None, None), fx=ratio, fy=ratio)
 
+        img = bytes_to_ndarray(imageFileBytes)
         drawImg = img.copy()
         img_H, img_W = img.shape[:2]
-        positions = np.array(screen_boxes)
-        print(positions.shape)
-        positions[:, :, 0] *= img_W
-        positions[:, :, 1] *= img_H
-        positions = positions.astype(np.int32)
-        
-        left_position = positions[left_idx]
-        right_position = positions[right_idx]
-        left_polygon = Polygon(left_position)
-        right_polygon = Polygon(right_position)
-
-
-        #crop and rotate text image
-        list_box = []
         images = []
-        txts = []
-        for i in range(len(positions)):
-            p1 = positions[i][0]
-            p2 = positions[i][1]
-            p3 = positions[i][2]
-            p4 = positions[i][3]
-            x_min,y_min,x_max,y_max = quad_coords_to_xyxy([p1,p2,p3,p4])
+        dbscan_final_box, dbscan_final_confidences = self.detection_model.predict_from_path(img)
+        boxes = []
+        for box in dbscan_final_box:
+            points = np.array(box, dtype=np.float32).reshape(-1, 1, 2)
+            points = points.astype(np.int32)
+            l, t, w, h = cv2.boundingRect(points)
+
+            xywhr = xyxyxyxy2xywhr(np.array([box],dtype=np.float32))
+            pts2 = xywhr2xyxyxyxy(xywhr).squeeze()
+            img_crop = perspective_transform(img, np.copy(pts2))
+            # img_crop = img[t:t+h, l:l+w]
             
-            
-            define_box = [p1, p2, p3, p4]
-            define_box = np.array(define_box, np.int32).reshape((-1, 1, 2))
-            x, y, width, height = cv2.boundingRect(define_box)
-            rotated_rect = cv2.minAreaRect(define_box)
-            is_rotated = rotated_rect[2] >= 10 and rotated_rect[2] <= 80
+            images.append(img_crop)
+            boxes.append([l, t, w, h])
 
-            if is_rotated:
-                line1 = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
-                line2 = math.sqrt((p4[0] - p1[0]) ** 2 + (p4[1] - p1[1]) ** 2)
-                if line1 >= line2:
-                    new_points = [[0, 0], [line1, 0], [line1, line2], [0, line2]]
-                else:
-                    new_points = [[0, line1], [0, 0], [line2, 0], [line2, line1]]
-                old_pts = np.array([p1, p2, p3, p4], dtype=np.float32).reshape((-1, 1, 2))
-                new_pts = np.array(new_points, dtype=np.float32).reshape((-1, 1, 2))
-                M, _ = cv2.findHomography(old_pts, new_pts)
-                cropImg = cv2.warpPerspective(img, M, (int(max(line1, line2)), int(min(line1, line2))))
-            else:
-                cropImg = img[y:y+height, x:x+width]
-
-            cv2.imwrite(f"./results/crop/{i}.png", cropImg)
-
-            if is_rotated:
-                result = detect_chalk_text(cropImg, self.ocr, threshold=100, height_threshold=100)
-            elif mode == '2' and i == 1:
-                result = detect_chalk_text(cropImg, self.ocr, threshold=180, height_threshold=80)
-            else:
-                result = detect_chalk_text(cropImg, self.ocr, threshold=100, height_threshold=100)
-                
-            print(f"{i}: {result}")
-
-            if len(result[0]) == 0:
-                images.append(self.img_transform(Image.fromarray(cropImg, 'RGB')))
-                list_box.append((x_min,y_min,x_max,y_max))
-            else:
-                for box in result[0]:
-                    l, t, w, h = cv2.boundingRect(np.array(box, dtype=np.int32).reshape((-1, 1, 2)))
-                    x = max(0, int(l - w * 0.1))
-                    y = max(0, int(t - h * 0.1))
-                    x_m = min(cropImg.shape[1], int(l + w * 1.1))
-                    y_m = min(cropImg.shape[0], int(y + h * 1.1))
-
-                    textImg = cropImg[y:y_m, x:x_m]
-                    import time
-                    cv2.imwrite(f"/home/hieu/hieunm/Paddle_parseq/results/textImg_api/{time.time()}.jpg",
-                                textImg)
-                    images.append(self.img_transform(Image.fromarray(textImg, 'RGB')))
-                    if is_rotated:
-                        inv_box = [[x, y], [x_m, y], [x_m, y_m], [x, y_m]]
-                        inv_box = np.array(inv_box, dtype=np.float32).reshape((-1, 1, 2))
-                        inv_box = cv2.perspectiveTransform(inv_box, np.linalg.inv(M))
-                        inv_box = inv_box.astype(np.int32)
-                        x1, y1, x2, y2 = quad_coords_to_xyxy(inv_box.squeeze(1).tolist())
-                        list_box.append((x1, y1, x2, y2))
-                    else:
-                        for i in range(len(box)):
-                            box[i][0] += x_min
-                            box[i][1] += y_min
-                        list_box.append((x_min + x,y_min + y,x_min + x_m,y_min+y_m))
-
-        if len(images) > 0:
-            images = torch.stack(images).to(self.args.device)
-            with torch.no_grad():
-                p = self.model(images)
-                p =  torch.softmax(p, dim=2)
-                p[:, :, 11:74] = 0
-                p[:, :, 75:76] = 0
-                p[:, :, 77:] = 0
-                pred, p = self.model.tokenizer.decode(p, text_threshold=0.5)
-            scores = ([s.cpu().mean().item() for s in p])
-            texts = pred
-            print(scores)
-        print("output texts: ", texts)
-
-        tensor_boxes = torch.Tensor(list_box)
-        scores = torch.Tensor(scores)
-        roi_indices = nms(tensor_boxes, scores, 0.3).numpy()
-
-        full_screen = [[x * img_W, y * img_H] for (x, y) in full_screen]
-        filtered_indices = []
-        screen_polygon = Polygon(full_screen)
-        for idx in roi_indices:
+        texts, scores = self.recognize_text(images)
+        print(f"Text: {texts}")
+        print(f"Scores: {scores}")
+        for idx in range(len(texts)):
             text = texts[idx]
-            x_min, y_min, x_max, y_max = list_box[idx]
-            
-            if scores[idx] < 0.9:
-                continue
-            if len(text) > self.max_length_text:
-                continue
-            is_contain_number = any([c for c in text if c.isdigit()])
-            if not is_contain_number:
-                continue
-            if (x_max - x_min > img_W * 0.3) or (y_max - y_min > img_H * 0.5):
-                continue
-
-            point = Point((x_min+x_max)/2 - (x_max-x_min)*0.1, (y_min+y_max)/2 - (y_max-y_min)*0.1)
-            if not screen_polygon.contains(point) and scores[idx] < 0.95:
-                continue
-            
-            filtered_indices.append(idx)
-        filtered_list_boxes = [list_box[idx] for idx in filtered_indices]
-        filtered_list_texts = [texts[idx] for idx in filtered_indices]
-        intersect_indices = remove_box_by_intersect_ratio(filtered_list_boxes)
-        # intersect_indices = range(len(filtered_list_boxes))
-        # print(filtered_list_boxes)
-        for idx in intersect_indices:
-            x_min, y_min, x_max, y_max = filtered_list_boxes[idx]
-            text = filtered_list_texts[idx]
+            score = scores[idx]
+            l, t, w, h = boxes[idx]
+            x_min, y_min, x_max, y_max = l, t, l+w, t+h
             if digit_before_dot > 0:
                 if "." or "," in text:
                     output_text = "".join([char for char in text if char.isdigit()])
@@ -325,7 +399,7 @@ class ImageReader():
             (text_width, text_height), baseline = cv2.getTextSize(text, font, font_size, thickness)
 
             cv2.rectangle(drawImg, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (0, 255, 0), 10)
-
+            
             if x_min + text_width > drawImg.shape[1]:
                 x_min = drawImg.shape[1] - text_width
             if y_min + text_height > drawImg.shape[0]:
@@ -339,6 +413,5 @@ class ImageReader():
         pil_image = Image.fromarray(drawImg)
         bytes_image = io.BytesIO()
         pil_image.save(bytes_image, format='PNG')
-        print(drawImg.shape)
 
         return bytes_image.getvalue()

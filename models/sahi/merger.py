@@ -7,7 +7,7 @@ import random
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
-from dbscan import DBScanPhuoc
+from .dbscan import DBScanPhuoc
 
 def clockwise_sort(points):
     points = points.squeeze()
@@ -37,8 +37,8 @@ def compute_iou(poly1, poly2):
 	
 
 class Merger:
-	def __init__(self, iou_thres=0.55,**kwargs):
-		self.iou_thres = iou_thres
+	def __init__(self, iou_merge_sahi=0.55,**kwargs):
+		self.iou_thres = iou_merge_sahi
 		self.db_scan = DBScanPhuoc(**kwargs)
 	def __call__(self, polygons, slice_locations,confidences):
 		
