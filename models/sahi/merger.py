@@ -47,6 +47,7 @@ class Merger:
 		self.all_polys = []
 		self.poly_map = {}
 		self.all_confidences = []
+	
 		# Process each polygon's slice and adjust coordinates
 		for i_frame,(polys, location,confidence) in enumerate(zip(polygons, slice_locations,confidences)):
 			x1, y1, x2, y2 = location
@@ -135,12 +136,13 @@ class Merger:
 		confidences = []
 		for g in final_groups:
 			if len(g) == 1:
+	
 				result.append(polys[g[0]])  # Keep as (n, 2) array
-				confidences.append(self.all_confidences[0])
-				# confidences.append(self.all_confidences[g[0]])
+				confidences.append(self.all_confidences[g[0]])
+				
 			else:
-				# confidences.append(np.mean([self.all_confidences[i] for i in g]))
-				confidences.append(self.all_confidences[0])
+				confidences.append(np.mean([self.all_confidences[i] for i in g]))
+				# confidences.append(self.all_confidences[g[0]])
 				merged_poly = self.merge_polygons([polys[i] for i in g])
 				result.append(merged_poly)
 

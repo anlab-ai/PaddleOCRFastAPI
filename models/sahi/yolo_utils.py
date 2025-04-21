@@ -45,6 +45,8 @@ def process_in_batches_yolo(images_preprocessed,
 
 		confidences = [result.obb.conf.cpu().numpy() for result in results]
 		post_result = [result.obb.xyxyxyxy.cpu().numpy() for result in results]
+		# if len(confidences) > 0:
+		# 	import pdb;pdb.set_trace()
 		# for confidence in confidences:
 		# 	confidence = confidence.tolist()
 		# 	all_confidences.extend(confidence)
@@ -53,8 +55,9 @@ def process_in_batches_yolo(images_preprocessed,
 		# 	all_phuoc_post_result.extend(result)
 		all_phuoc_post_result.extend(post_result)
 		all_confidences.extend(confidences)
+		assert len(confidences) == len(post_result)
 
-	final_box, final_confidences = merger(polygons=copy.deepcopy(all_phuoc_post_result), slice_locations=locations, confidences=confidences)
+	final_box, final_confidences = merger(polygons=copy.deepcopy(all_phuoc_post_result), slice_locations=locations, confidences=all_confidences)
 
 	# return final_box, final_confidences
 	return final_box, final_confidences

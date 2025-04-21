@@ -9,7 +9,7 @@ import numpy as np
 class YOLO_SAHI:
 	def __init__(self,
 			  	model_path,
-				confidence_threshold=0.3,
+				confidence_threshold,
 				device="cuda:0",
 				**kwargs
 			  ):
@@ -28,16 +28,21 @@ class YOLO_SAHI:
 		elif isinstance(img, np.ndarray):
 			original_image = img.copy()
 
-		sliced_images,all_slice_bounds = self.img_slicer(original_image)
+		sliced_images, all_slice_bounds = self.img_slicer(original_image)
+		# print(all_slice_bounds)
+		# for idx, image in enumerate(sliced_images):
+		# 	results = self.core_detection.predict(image)
+		# 	results[0].save(f"/media/hieu/data/download/Archive/2/{idx}.jpg")
+			# cv2.imwrite(f"/media/hieu/data/download/Archive/2/{idx}.jpg", image)
+		
 		sahi_box,sahi_confidences = process_in_batches_yolo(sliced_images,
 														self.core_detection,
 														self.sahi_merge,
 														all_slice_bounds,
-														batch_size=40,
+														batch_size=1,
 														conf=self.confidence_threshold,
 														iou=0.7,
 														device = self.device)
-  
 		image_size = (original_image.shape[1],original_image.shape[0])
 		dbscan_final_box,dbscan_final_confidences = self.sahi_merge.dbcan_merge(sahi_box,
                                                                       		image_size = image_size,

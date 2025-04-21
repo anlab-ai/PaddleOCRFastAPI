@@ -31,6 +31,21 @@ async def detect_by_file(file: UploadFile):
         )
 
     return Response(json.dumps(result))
+@router.post('/detect_and_recognition-by-file', response_model=RestfulModel, summary="detect text box in file")
+async def detect_by_file(file: UploadFile):
+    # print("Running mode: ", mode)
+    result = {}
+    if file.filename.endswith((".jpg", ".jpeg",".png")):
+        file_data = file.file
+        file_bytes = file_data.read()
+        result = imageReader.ReadImageWithMode(file_bytes, mode = None,infos=None)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="only upload file .jpg, .jpeg or .png"
+        )
+
+    return Response(result, media_type="image/png")
 
 @router.post('/read-file-with-position', response_model=RestfulModel, summary="read file at some position")
 async def read_file_with_position(file: UploadFile, positions: str=Form(), infos: str=Form()):
