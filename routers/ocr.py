@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import traceback
 from typing import Annotated
 from fastapi import APIRouter, HTTPException, UploadFile, status, Form
 from models.OCRModel import *
@@ -71,7 +72,11 @@ async def read_file_with_mode(file: UploadFile, mode: Annotated[str, Form()], in
         file_data = file.file
         file_bytes = file_data.read()
         # output_file_bytes = file_bytes
-        output_file_bytes = imageReader.ReadImageWithMode(file_bytes, mode, infos)
+        try:
+            output_file_bytes = imageReader.ReadImageWithMode(file_bytes, mode, infos)
+        except Exception as e:
+            print(traceback.format_exc())
+            return Response(file_bytes, media_type="image/png")
         # result = imageReader.ReadImageWithMode(file_bytes, mode)
     else:
         raise HTTPException(

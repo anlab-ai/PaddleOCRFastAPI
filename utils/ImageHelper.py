@@ -139,3 +139,76 @@ def mergeLine(boxes):
             group = []
             
     return lines
+
+
+
+
+import cv2
+import numpy as np
+
+def draw_vertical_text(drawImg, text, position, font, font_size, color, thickness, ):
+    """
+    Draw vertical text on an image by rotating it 90 degrees counterclockwise.
+    
+    Args:
+        drawImg: Input image (BGR format, NumPy array).
+        text: String to draw.
+        position: Tuple (x_min, y_min) for text placement.
+        font: OpenCV font (e.g., cv2.FONT_HERSHEY_SIMPLEX).
+        font_size: Font scale factor.
+        color: Text color in BGR format (e.g., (0, 0, 255) for red).
+        thickness: Text thickness.
+        **kwargs: Additional arguments for cv2.putText (e.g., lineType).
+
+    Returns:
+        Image with vertical text drawn.
+    """
+    
+    # Get text size for temporary image
+    text_size, _ = cv2.getTextSize(text, font, font_size, thickness)
+    text_w,text_h = text_size
+    temp_img = np.zeros((text_size[1], text_size[0], 3), dtype=np.uint8)  # BGR temp image
+
+    # Draw text on temporary image
+    cv2.putText(temp_img, text, (0, text_size[1]), font, font_size, color, thickness)
+
+    # Rotate the temporary image 90 degrees counterclockwise
+    rotated = cv2.rotate(temp_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+    # Calculate position and size
+    x_min, y_min,y_max = position
+    h, w = rotated.shape[:2]
+
+    # Check bounds to avoid out-of-bounds errors
+    if x_min + w <= drawImg.shape[1] and y_min + h <= drawImg.shape[0]:
+        # Blend rotated text onto the original image
+        # Create a mask for non-zero pixels (text pixels) in any channel
+        mask = np.any(rotated != 0, axis=2)  # True where any channel is non-zero
+        # ensure h_top + h_bottom = h due to image copy must match shape
+        h_top = h//2
+        h_bottom = h-h//2
+        # Copy text pixels to the original image using the mask
+        drawImg[(y_min+y_max)//2-h_top:(y_min+y_max)//2+h_bottom, x_min-text_h:x_min+w-text_h][mask] = rotated[mask]
+    else:
+        print(f"Warning: Text at ({x_min}, {y_min}) exceeds image bounds ({drawImg.shape[1]}, {drawImg.shape[0]}).")
+
+    return drawImg
+
+
+def draw_horizonal_text(drawImg,
+                        text,
+                        position,
+                        font,
+                        font_size,
+                        color,
+                        thickness,
+                        bottomLeftOrigin=False):
+    x_min,y_min,x_max = position
+    (text_width, text_height), baseline = cv2.getTextSize(text, font, font_size, thickness)
+    if x_min + text_width> drawImg.shape[1]:
+        x_min = drawImg.shape[1] - text_width
+    if y_min + text_height > drawImg.shape[0]:
+        y_min = drawImg.shape[0] - text_height
+    cv2.putText(drawImg, text, (int((x_max+x_min-text_width)/2),int(y_min)), font, font_size, color, thickness,
+						bottomLeftOrigin=bottomLeftOrigin)
+    return drawImg

@@ -7,6 +7,7 @@ import math
 import argparse
 import torch
 from shapely.geometry import Polygon, Point
+from torchvision.ops import box_iou
 
 from pydantic import BaseModel
 from paddleocr import PaddleOCR, draw_ocr
@@ -25,6 +26,7 @@ from ultralytics.utils.ops import xyxyxyxy2xywhr,xywhr2xyxyxyxy
 from .sahi.sahi_phuoc import YOLO_SAHI
 from .sahi.flip_img import Rotator
 from .sahi.image_cropper import perspective_transform,clockwise_sort
+from utils.ImageHelper import draw_vertical_text,draw_horizonal_text
 
 class OCRModel(BaseModel):
 	coordinate: List  # 图像坐标
@@ -277,7 +279,8 @@ class ImageReader():
 			slice_height = 840,
 			slice_width = 840,
 			overlap = 0.3,
-			iou_merge_sahi = 0.4
+			iou_merge_sahi = 0.4,
+			
 		)
 		self.rotator = Rotator("/home/hieu/hieunm/Paddle_parseq/parseq_rec_model/best_cls_text_direct.pt")
 	def recognize_single_text(self, image: np.ndarray):
@@ -363,10 +366,12 @@ class ImageReader():
 		digit_before_dot = 0
 
 		img = bytes_to_ndarray(imageFileBytes)
+		
 		drawImg = img.copy()
 		img_H, img_W = img.shape[:2]
-		
+		logger.info("Start detection")
 		dbscan_final_box, dbscan_final_confidences = self.detection_model.predict_from_path(img)
+		logger.info("Detection done!")
 		#mode 3: Filter all box has confidence < box_thresh (default 0.58)
 		if str(mode) == '3':
 			box_thresh = 0.58
@@ -396,7 +401,9 @@ class ImageReader():
 			# x_min, y_min, x_max, y_max = l, t, l+w, t+h
 			# cv2.rectangle(drawImg, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (0, 255, 0), 10)
 
+		logger.info("Detection and crop done!")
 		texts, scores = self.recognize_text(images,x_y_mean)
+		logger.info("Recognition done")
 
 		# print(texts,scores)
 		if str(mode) == '3':
@@ -406,6 +413,13 @@ class ImageReader():
 
 		print(f"Text: {texts}")
 		print(f"Scores: {scores}")
+
+		draw_boxes = []
+		draw_texts = []
+
+		font_size = img_H//1000
+		thickness = img_H//700
+		font = cv2.FONT_HERSHEY_SIMPLEX
 
 		for idx in range(len(texts)):
 			text = texts[idx]
@@ -419,20 +433,55 @@ class ImageReader():
 						output_text = output_text[:digit_before_dot] + "." + output_text[digit_before_dot:]
 						text = output_text
 
-			font_size = img_H//2000
-			thickness = img_H//320
-			font = cv2.FONT_HERSHEY_SIMPLEX
-			(text_width, text_height), baseline = cv2.getTextSize(text, font, font_size, thickness)
+			draw_boxes.append([l, t, w, h])
+			draw_texts.append(text)
 
-			cv2.rectangle(drawImg, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (0, 255, 0), 10)
+		draw_ids = np.argsort(np.array(draw_boxes)[:, 0])
+		existed_text_boxes = []
+
+		for idx in draw_ids:
+			l, t, w, h = draw_boxes[idx] 
+			x_min, y_min, x_max, y_max = l, t, l+w, t+h
+			cv2.rectangle(drawImg, (x_min, y_min), (x_max, y_max), (0, 255, 0), 10)
+
+		for idx in draw_ids:
+			l, t, w, h = draw_boxes[idx]
+			x_min, y_min, x_max, y_max = l, t, l+w, t+h
+			text = draw_texts[idx]
+			(text_width, text_height), _ = cv2.getTextSize(text, font, font_size, thickness)
+			# if w/h < 1.5:
+			# 	drawImg = draw_vertical_text(drawImg, text, (int(x_min),int(y_min),int(y_max)), font, font_size, (0, 0, 255), thickness,)
+			# else:
+				# cv2.putText(img, text, (x_min, y_max+text_height), font, font_size, (0, 0, 255), thickness)
+				# continue
+			if len(existed_text_boxes) == 0:
+				cv2.putText(drawImg, text, (x_min, y_min), font, font_size, (0, 0, 255), thickness)
+				existed_text_boxes.append([x_min, y_min, x_min+text_width, y_min+text_height])
+			else:
+				text_boxes = torch.Tensor(existed_text_boxes)
+				box = torch.Tensor([[x_min, y_min, x_min+text_width, y_min+text_height]])
+				ious = box_iou(box, text_boxes)
+				if ious.max() > 0:
+
+					cv2.putText(drawImg, text, (x_min, y_max+text_height), font, font_size, (0, 0, 255), thickness)
+					existed_text_boxes.append([x_min, y_max+text_height, x_min+text_width, y_max+text_height+text_height])
+				else:
+					cv2.putText(drawImg, text, (x_min, y_min), font, font_size, (0, 0, 255), thickness)
+					existed_text_boxes.append([x_min, y_min, x_min+text_width, y_min+text_height])
 			
-			if x_min + text_width > drawImg.shape[1]:
-				x_min = drawImg.shape[1] - text_width
-			if y_min + text_height > drawImg.shape[0]:
-				y_min = drawImg.shape[0] - text_height
 			
-			cv2.putText(drawImg, text, (int((x_max+x_min)/2),int(y_min)), font, font_size, (0, 0, 255), thickness,
-						bottomLeftOrigin=False)
+
+			# cv2.rectangle(drawImg, (int(x_min),int(y_min)), (int(x_max),int(y_max)), (0, 255, 0), 10)
+
+			# # backup
+			# # cv2.putText(drawImg, text, (int((x_max+x_min)/2),int(y_min)), font, font_size, (0, 0, 255), thickness,
+			# # 			bottomLeftOrigin=False)
+			
+			# if w/h < 1.5:
+			# 	drawImg = draw_vertical_text(drawImg, text, (int(x_min),int(y_min),int(y_max)), font, font_size, (0, 0, 255), thickness,)
+			# else:
+			# 	drawImg =  draw_horizonal_text(drawImg, text, (int(x_min),int(y_min),int(x_max)), font, font_size, (0, 0, 255), thickness)
+			# cv2.putText()
 		
 		drawImg = cv2.resize(drawImg, (0,0), fx=0.5, fy=0.5)
 		drawImg = cv2.cvtColor(drawImg, cv2.COLOR_BGR2RGB)

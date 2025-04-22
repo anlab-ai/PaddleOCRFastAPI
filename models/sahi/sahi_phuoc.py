@@ -21,7 +21,7 @@ class YOLO_SAHI:
 		self.kwrags = kwargs
 		self.img_slicer = SliceImage(**kwargs)
 		self.sahi_merge  = Merger(**kwargs)
-
+		
 	def predict_from_path(self, img):
 		if isinstance(img, str):
 			original_image = cv2.imread(img)
@@ -29,12 +29,15 @@ class YOLO_SAHI:
 			original_image = img.copy()
 
 		sliced_images, all_slice_bounds = self.img_slicer(original_image)
+		print(f"Len slice image: {len(sliced_images)}")
+		# print(len(sliced_images))
 		# print(all_slice_bounds)
 		# for idx, image in enumerate(sliced_images):
 		# 	results = self.core_detection.predict(image)
 		# 	results[0].save(f"/media/hieu/data/download/Archive/2/{idx}.jpg")
 			# cv2.imwrite(f"/media/hieu/data/download/Archive/2/{idx}.jpg", image)
-		
+		from time import time
+		t1 = time()
 		sahi_box,sahi_confidences = process_in_batches_yolo(sliced_images,
 														self.core_detection,
 														self.sahi_merge,
@@ -43,6 +46,11 @@ class YOLO_SAHI:
 														conf=self.confidence_threshold,
 														iou=0.7,
 														device = self.device)
+		print("Time: ",time()-t1)
+		if len(sahi_box) == 0:
+			return [], []
+		# print(f"Sahi box: {len(sahi_box)}")
+		# print("Process yolo done!")
 		image_size = (original_image.shape[1],original_image.shape[0])
 		dbscan_final_box,dbscan_final_confidences = self.sahi_merge.dbcan_merge(sahi_box,
                                                                       		image_size = image_size,

@@ -34,29 +34,36 @@ def process_in_batches_yolo(images_preprocessed,
 	all_phuoc_post_result = []
 	all_confidences = []
 	# Process images in batches
-	
+# for batch_size in [1,2,3,4]:
+	# print(f"Bacth size {batch_size}")
+	# from time import time
+	# t1 = time()
+	# time_list = []
 	for start_idx in range(0, num_images, batch_size):
-		end_idx = min(start_idx + batch_size, num_images)
-		batch_images = images_preprocessed[start_idx:end_idx]
-		# Stack into NumPy arrays for the current batch
-		# Run inference
-		with torch.no_grad():
-			results = model(batch_images, conf=conf, iou=iou, device=device, verbose=False)
-
-		confidences = [result.obb.conf.cpu().numpy() for result in results]
-		post_result = [result.obb.xyxyxyxy.cpu().numpy() for result in results]
-		# if len(confidences) > 0:
-		# 	import pdb;pdb.set_trace()
-		# for confidence in confidences:
-		# 	confidence = confidence.tolist()
-		# 	all_confidences.extend(confidence)
-		# for result in post_result:
-		# 	result = result.tolist()
-		# 	all_phuoc_post_result.extend(result)
-		all_phuoc_post_result.extend(post_result)
-		all_confidences.extend(confidences)
-		assert len(confidences) == len(post_result)
-
+			end_idx = min(start_idx + batch_size, num_images)
+			batch_images = images_preprocessed[start_idx:end_idx]
+			# Stack into NumPy arrays for the current batch
+			# Run inference
+			# t3 = time()
+			with torch.no_grad():
+				results = model(batch_images, conf=conf, iou=iou, device=device, verbose=False)
+			# time_list.append(time()-t3)
+			confidences = [result.obb.conf.cpu().numpy() for result in results]
+			post_result = [result.obb.xyxyxyxy.cpu().numpy() for result in results]
+			# if len(confidences) > 0:
+			# 	import pdb;pdb.set_trace()
+			# for confidence in confidences:
+			# 	confidence = confidence.tolist()
+			# 	all_confidences.extend(confidence)
+			# for result in post_result:
+			# 	result = result.tolist()
+			# 	all_phuoc_post_result.extend(result)
+			all_phuoc_post_result.extend(post_result)
+			all_confidences.extend(confidences)
+			assert len(confidences) == len(post_result)
+	# total_all_patch = time()-t1
+	# print(f"Run all patches time: {total_all_patch}")
+	# print(f"Average time each batch: {sum(time_list)/len(time_list)}")
 	final_box, final_confidences = merger(polygons=copy.deepcopy(all_phuoc_post_result), slice_locations=locations, confidences=all_confidences)
 
 	# return final_box, final_confidences
