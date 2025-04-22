@@ -417,7 +417,10 @@ class ImageReader():
 		draw_boxes = []
 		draw_texts = []
 
-		font_size = img_H//1000
+		if img_H > 3500:
+			font_size = img_H//1000
+		else:
+			font_size = img_H//400
 		thickness = img_H//700
 		font = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -461,8 +464,10 @@ class ImageReader():
 				text_boxes = torch.Tensor(existed_text_boxes)
 				box = torch.Tensor([[x_min, y_min, x_min+text_width, y_min+text_height]])
 				ious = box_iou(box, text_boxes)
-				if ious.max() > 0:
-
+				if (x_min+text_width > img_W):
+					cv2.putText(drawImg, text, (img_W-text_width, y_max+text_height), font, font_size, (0, 0, 255), thickness)
+					existed_text_boxes.append([img_W-text_width, y_max+text_height, img_W-text_width+text_width, y_max+text_height+text_height])
+				elif ious.max() > 0 or (y_min-text_height < 0):
 					cv2.putText(drawImg, text, (x_min, y_max+text_height), font, font_size, (0, 0, 255), thickness)
 					existed_text_boxes.append([x_min, y_max+text_height, x_min+text_width, y_max+text_height+text_height])
 				else:
