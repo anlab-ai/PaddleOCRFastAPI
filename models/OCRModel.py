@@ -282,7 +282,7 @@ class ImageReader():
 			iou_merge_sahi = 0.4,
 			
 		)
-		self.rotator = Rotator("/home/hieu/hieunm/Paddle_parseq/parseq_rec_model/best_cls_text_direct.pt")
+		self.rotator = Rotator("parseq_rec_model/best_cls_text_direct.pt")
 	def recognize_single_text(self, image: np.ndarray):
 		transform_image = [self.img_transform(Image.fromarray(image, "RGB"))]
 		inputs = torch.stack(transform_image).to(self.args.device)

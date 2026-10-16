@@ -25,4 +25,4 @@ RUN pip3 install -r /app/requirement/requirements.txt
 RUN pip3 install -r /app/requirement/sahi.txt
 
 # CMD ["python3", "./main.py"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
