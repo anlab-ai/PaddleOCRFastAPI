@@ -52,7 +52,7 @@ async def detect_by_file(file: UploadFile):
 async def read_file_with_position(file: UploadFile, positions: str=Form(), infos: str=Form()):
     items = json.loads(positions)
     configs = json.loads(infos)
-    if file.filename.endswith((".jpg", ".jpeg",".png")):
+    if file.filename.endswith((".jpg", ".jpeg",".png", ".JPG")):
         file_data = file.file
         file_bytes = file_data.read()
         output_file_bytes = file_bytes
@@ -68,7 +68,7 @@ async def read_file_with_position(file: UploadFile, positions: str=Form(), infos
 # @router.post('/read-file-with-mode', response_model=RestfulModel, summary="detect and read file with position mode")
 @router.post('/read-file-with-mode', response_model=RestfulModel, summary="detect and read file with position mode")
 async def read_file_with_mode(file: UploadFile, mode: Annotated[str, Form()], infos: Annotated[str, Form()]):
-    if file.filename.endswith((".jpg", ".jpeg", ".png")):
+    if file.filename.endswith((".jpg", ".jpeg", ".png", ".JPG")):
         file_data = file.file
         file_bytes = file_data.read()
         # output_file_bytes = file_bytes

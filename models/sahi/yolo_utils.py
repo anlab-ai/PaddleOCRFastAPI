@@ -42,6 +42,12 @@ def process_in_batches_yolo(images_preprocessed,
 	for start_idx in range(0, num_images, batch_size):
 			end_idx = min(start_idx + batch_size, num_images)
 			batch_images = images_preprocessed[start_idx:end_idx]
+
+			# for batch_idx, image in enumerate(batch_images):
+			# 	idx_name = f"{start_idx}_{batch_idx}"
+			# 	cv2.imwrite(
+			# 		f"/media/hieu/data/source_code/RedChalk/debug/{idx_name}.jpg", batch_images[batch_idx]
+			# 	)
 			# Stack into NumPy arrays for the current batch
 			# Run inference
 			# t3 = time()

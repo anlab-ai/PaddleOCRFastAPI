@@ -266,21 +266,20 @@ class ImageReader():
 		parser = argparse.ArgumentParser()
 		
 		# parser.add_argument('--images', nargs='+', help='Images to read')
-		parser.add_argument('--device', default='cpu')
+		parser.add_argument('--device', default='cuda:0')
 		self.args, unknown = parser.parse_known_args()
-		kwargs = {} #parse_model_args(unknown)
+		kwargs = {} #parse_model_args(unknown)"
 		self.model = load_from_checkpoint('parseq_rec_model/parsseq_multi_direct.pt', **kwargs).eval().to(self.args.device)
 		self.img_transform = SceneTextDataModule.get_transform(self.model.hparams.img_size)
 		self.max_length_text = 10
 		self.detection_model = YOLO_SAHI(
 			model_path="parseq_rec_model/best.pt",
-			confidence_threshold=0.35,
+			confidence_threshold=0.2,
 			device=self.args.device,
-			slice_height = 840,
-			slice_width = 840,
+			slice_height = 420, #840,
+			slice_width = 420,#840,
 			overlap = 0.3,
 			iou_merge_sahi = 0.4,
-			
 		)
 		self.rotator = Rotator("parseq_rec_model/best_cls_text_direct.pt")
 	def recognize_single_text(self, image: np.ndarray):
